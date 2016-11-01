@@ -418,10 +418,7 @@
     (handler/init recover-handler)
     (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler recover-assembler fragment-limit-receiver)
     (when-let [session-id (handler/ready-session-id recover-handler)]
-      (let [ready-reply (->ReadyReply (m/replica-version messenger)
-                                      ; ew
-                                      (.id messenger)
-                                      session-id)
+      (let [ready-reply (->ReadyReply (m/replica-version messenger) (m/id messenger) session-id)
             payload ^bytes (messaging-compress ready-reply)
             buf ^UnsafeBuffer (UnsafeBuffer. payload)] 
         (.offer ^Publication hb-pub buf 0 (.capacity buf))))))
@@ -543,6 +540,7 @@
   (set-heartbeat-peers! [this expected-peers]
     (sub-mon/set-heartbeat-peers! hb-mon expected-peers)
     this)
+  (id [this] id)
   (start [this]
     (let [error-handler (reify ErrorHandler
                           (onError [this x] 
@@ -576,14 +574,15 @@
     ;; Split into different step?
     (if (sub-mon/ready? hb-mon)
       (.offer ^Publication publication buf 0 (.capacity buf)) 
-      (do
-       (sub-mon/poll! hb-mon)
-       (let [ready (->Ready (m/replica-version messenger) src-peer-id dst-task-id)
-             payload ^bytes (messaging-compress ready)
-             buf ^UnsafeBuffer (UnsafeBuffer. payload)]
-         (.offer ^Publication publication buf 0 (.capacity buf))
-         ;; Return not ready error code for now
-         NOT_READY)))))
+      (let [_ (sub-mon/poll! hb-mon)
+            ready (->Ready (m/replica-version messenger) src-peer-id dst-task-id)
+            payload ^bytes (messaging-compress ready)
+            buf ^UnsafeBuffer (UnsafeBuffer. payload)
+            ret (.offer ^Publication publication buf 0 (.capacity buf))]
+        (Thread/sleep 1000)
+        (println "Offered ready message:" ret)
+        ;; Return not ready error code for now
+        NOT_READY))))
 
 (defn new-publication [messenger messenger-group {:keys [job-id src-peer-id dst-task-id slot-id site] :as pub-info}]
   (->Publisher messenger messenger-group job-id src-peer-id dst-task-id slot-id site 
